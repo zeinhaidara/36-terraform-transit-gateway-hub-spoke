@@ -128,6 +128,78 @@ run "routing_forces_spokes_through_inspection" {
   }
 }
 
+# Spokes must never reach each other directly: no default tables, no spoke
+# propagation into the spokes table, and the inspection subnets are wired in order.
+run "spokes_isolated_and_inspection_subnets_wired" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for a in aws_ec2_transit_gateway_vpc_attachment.spoke :
+      a.transit_gateway_default_route_table_association == false && a.transit_gateway_default_route_table_propagation == false
+    ])
+    error_message = "spoke attachments must not use the default TGW route table"
+  }
+
+  assert {
+    condition     = aws_ec2_transit_gateway_vpc_attachment.inspection.transit_gateway_default_route_table_association == false && aws_ec2_transit_gateway_vpc_attachment.inspection.transit_gateway_default_route_table_propagation == false
+    error_message = "inspection attachment must not use the default TGW route table"
+  }
+
+  assert {
+    condition = alltrue([
+      for p in aws_ec2_transit_gateway_route_table_propagation.spoke :
+      p.transit_gateway_route_table_id != aws_ec2_transit_gateway_route_table.spokes.id
+    ])
+    error_message = "no spoke may propagate into the spokes route table"
+  }
+
+  assert {
+    condition     = aws_route_table_association.tgw.subnet_id == aws_subnet.tgw.id && aws_route_table_association.tgw.route_table_id == aws_route_table.tgw.id
+    error_message = "TGW subnet must use the route table that points at the firewall"
+  }
+
+  assert {
+    condition     = aws_route_table_association.firewall.subnet_id == aws_subnet.firewall.id && aws_route_table_association.firewall.route_table_id == aws_route_table.firewall.id
+    error_message = "firewall subnet must use the route table that returns to the TGW"
+  }
+
+  assert {
+    condition     = aws_networkfirewall_firewall_policy.this.firewall_policy[0].stateless_default_actions == toset(["aws:forward_to_sfe"])
+    error_message = "stateless default must hand every packet to the stateful rules"
+  }
+}
+
+run "firewall_endpoint_missing_in_az_fails" {
+  command = plan
+  # Fresh state, so the firewall from the earlier apply runs isn't reused.
+  state_key = "missing_az"
+
+  # The endpoint only exists in eu-west-2b; the module asked for eu-west-2a.
+  override_resource {
+    target          = aws_networkfirewall_firewall.this
+    override_during = plan
+    values = {
+      firewall_status = [{
+        sync_states = [{
+          availability_zone = "eu-west-2b"
+          attachment = [{
+            endpoint_id = "vpce-0123456789abcdef0"
+            subnet_id   = "subnet-0f00000000000000f"
+            status      = "READY"
+          }]
+        }]
+        capacity_usage_summary                 = []
+        configuration_sync_state_summary       = "IN_SYNC"
+        status                                 = "READY"
+        transit_gateway_attachment_sync_states = []
+      }]
+    }
+  }
+
+  expect_failures = [aws_route.tgw_to_firewall]
+}
+
 run "example_rule_allows_only_the_chosen_port" {
   command = plan
 
