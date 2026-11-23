@@ -5,9 +5,13 @@ VPC with an AWS Network Firewall endpoint, attachments for your spoke VPCs,
 and the route tables that force all spoke-to-spoke traffic through the
 firewall.
 
-> **Status:** `terraform validate` and 8 `terraform test` runs against a
+> **Status:** `terraform validate` and 10 `terraform test` runs against a
 > mocked AWS provider: one full apply-with-mocks that checks every routing
-> hop and appliance mode, one rule-set check, and six rejected inputs.
+> hop and appliance mode, one that checks spoke isolation (no default route
+> tables, no spoke propagation into the spokes table) and the inspection
+> subnet route table associations, one where the firewall has no endpoint
+> in the chosen AZ and the plan must fail, one rule-set check, and six
+> rejected inputs.
 > **Nothing has been planned or applied against AWS**, so real behaviour
 > (endpoint creation, route propagation timing) is untested.
 > **Scope:** AWS Transit Gateway + Network Firewall only. Azure Virtual WAN
@@ -18,6 +22,11 @@ firewall.
 > Create a Terraform module for a transit gateway / virtual WAN
 > hub-and-spoke architecture with centralized inspection (AWS Network
 > Firewall / Azure Firewall).
+
+Why it matters: with many VPCs, full-mesh peering or a flat transit gateway
+lets any VPC reach any other without a check in between. Routing every
+spoke-to-spoke flow through one firewall gives a single place to see and
+control east-west traffic.
 
 ## Traffic path
 
@@ -140,7 +149,9 @@ This is not a free-tier setup; check current AWS pricing before applying.
 - AWS only; Azure is not implemented.
 - East-west inspection only. There is no internet egress (no NAT or IGW)
   in the inspection VPC.
-- Single-AZ firewall endpoint (see trade-off above).
+- Single-AZ firewall endpoint (see trade-off above). If the firewall has
+  no endpoint in `availability_zone`, the plan fails with a clear message
+  instead of creating a route with no target.
 - No firewall logging or VPC flow logs are configured.
 - Spoke VPCs, their subnets, and their route tables must already exist.
 - Network Firewall can now also attach directly to a Transit Gateway

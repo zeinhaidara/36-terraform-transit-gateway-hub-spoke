@@ -67,6 +67,14 @@ resource "aws_route" "tgw_to_firewall" {
   route_table_id         = aws_route_table.tgw.id
   destination_cidr_block = "0.0.0.0/0"
   vpc_endpoint_id        = local.firewall_endpoint_id
+
+  lifecycle {
+    # Without an endpoint in our AZ, inspected traffic would have nowhere to go.
+    precondition {
+      condition     = local.firewall_endpoint_id != null
+      error_message = "The firewall has no endpoint in ${var.availability_zone}, so traffic can't be inspected."
+    }
+  }
 }
 
 resource "aws_route_table_association" "tgw" {
